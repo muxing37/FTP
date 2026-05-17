@@ -65,7 +65,6 @@ int TcpSocket::recvMsg(std::string& msg) {
   int ret=recv_all(sockfd_,&len,sizeof(len));
   if(ret==0) return -1;
   if(ret!=sizeof(len)) return -1;
-
   
   uint32_t l=ntohl(len);
 
