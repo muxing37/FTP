@@ -12,6 +12,7 @@ add_executable(ftp
     src/ftpserver.cpp
     src/ftpclient.cpp
     src/ftpctrl.cpp
+    src/ftpls.cpp
 )
 
 # target_link_libraries(ftp pthread)

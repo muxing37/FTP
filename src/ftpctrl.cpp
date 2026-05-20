@@ -1,6 +1,7 @@
 #include "ftpctrl.h"
 #include "ftpserver.h"
 #include "ftpclient.h"
+#include "ftpls.h"
 
 #define MAX_PATH 1024
 
@@ -110,7 +111,7 @@ std::vector<std::string> gettoken(std::string input) {
         token.push_back(current);
     }
 
-    if(token[0]=="ls") token.push_back("--color=auto");
+    // if(token[0]=="ls") token.push_back("--color=auto");
 
     return token;
 }
@@ -126,17 +127,17 @@ int run_cmd(std::vector<std::string> token) {
 
     cmd.push_back(nullptr);
 
-    pid_t pid;
+    // pid_t pid;
 
-    pid=fork();
+    // pid=fork();
 
-    if(pid==0) {
-        restore_signal();
-        execvp(token[0].c_str(),cmd.data());
-        perror("execvp");
-        exit(1);
-    }
-    waitpid(-1,&status,WUNTRACED);
+    // if(pid==0) {
+    //     restore_signal();
+    //     execvp(token[0].c_str(),cmd.data());
+    //     perror("execvp");
+    //     exit(1);
+    // }
+    // waitpid(-1,&status,WUNTRACED);
 
     running=0;
     return 0;
@@ -187,9 +188,11 @@ std::cout << res << std::endl;
         if(input=="exit") {
             signal(SIGCHLD,SIG_IGN);
             rl_clear_history();
-            exit(0);
+            // exit(0);
+            break;
         }
     }
+    // client.
     return 0;
 }
 
@@ -259,8 +262,29 @@ int start_server() {
             continue;
         }
 
-        run_cmd(token);
+        if(token[0]=="ls") {
+            std::vector<char*> argv;
+            int argc=0;
+            now_path=now_path+"/ls";
+            argv.push_back(now_path.data());
+            argc++;
+            for(auto& s : token) {
+                if(s=="ls") continue;
+                argv.push_back(s.data());
+                argc++;
+            }
 
+            // if(argv.size()==1) {
+
+            // }
+            // argv.push_back(nullptr);
+
+            startls(argc,argv.data());
+            // cd(token[1]);
+            continue;
+        }
+
+        run_cmd(token);
 
     }
     return 0;
