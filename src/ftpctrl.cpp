@@ -111,34 +111,37 @@ std::vector<std::string> gettoken(std::string input) {
         token.push_back(current);
     }
 
-    // if(token[0]=="ls") token.push_back("--color=auto");
-
     return token;
 }
 
-int run_cmd(std::vector<std::string> token) {
+int run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
     running=1;
+    auto path=std::filesystem::current_path();
+    std::string now_path=path.string();
     int status;
 
-    std::vector<char*> cmd;
-    for(auto& s : token) {
-        cmd.push_back(s.data());
+    if(token[0]=="cd" || token[0]=="CWD") {
+        if(token.size()>2) {
+            std::cout << "CWD: 参数太多" << std::endl;
+        }
+        cd(token[1]);
     }
 
-    cmd.push_back(nullptr);
+    if(token[0]=="ls" || token[0]=="LIST") {
+        std::vector<char*> argv;
+        int argc=0;
+        now_path=now_path+"/ls";
+        argv.push_back(now_path.data());
+        argc++;
+        for(auto& s : token) {
+            if(s=="ls" || s=="LIST") continue;
+            argv.push_back(s.data());
+            argc++;
+        }
+        std::vector<std::string> ls_res;
+        ls_res=startls(argc,argv.data());
 
-    // pid_t pid;
-
-    // pid=fork();
-
-    // if(pid==0) {
-    //     restore_signal();
-    //     execvp(token[0].c_str(),cmd.data());
-    //     perror("execvp");
-    //     exit(1);
-    // }
-    // waitpid(-1,&status,WUNTRACED);
-
+    }
     running=0;
     return 0;
 }
@@ -181,9 +184,28 @@ int start_client() {
 
         if(!input.empty()) sock->sendMsg(input);
 
-std::string res;
-sock->recvMsg(res);
-std::cout << res << std::endl;
+        std::string res;
+        sock->recvMsg(res);
+        std::cout << res << std::endl;
+
+        // while(true) {
+        //     std::string ech;
+        //     sock->recvMsg(ech);
+        //     if(ech=="stop") break;
+        //     if(ech=="ls_start") {
+        //         while(true) {
+        //             std::string rec;
+        //             sock->recvMsg(rec);
+        //             if(rec=="ls_stop") {
+        //                 break;
+        //             } else {
+        //                 std::cout << rec << std::endl;
+        //             }
+        //         }
+        //     } else if(ech=="pasv_start") {
+
+        //     }
+        // }
 
         if(input=="exit") {
             signal(SIGCHLD,SIG_IGN);
@@ -192,12 +214,12 @@ std::cout << res << std::endl;
             break;
         }
     }
-    // client.
     return 0;
 }
 
 int start_server() {
     chdir(getenv("HOME"));
+    int if_pasv=0;
     TcpServer server;
 
     if(!server.setListen(2100)) {
@@ -215,6 +237,7 @@ int start_server() {
     std::cout << "[PASS] client connected\n";
 
     TcpSocket* sock = server.getSocket();
+    TcpSocket* pasv;
     if(sock == nullptr) {
         std::cerr << "[FAIL] getSocket returned nullptr\n";
         return 1;
@@ -246,46 +269,20 @@ int start_server() {
         if(token.size()==0) {
             continue;
         }
-// token.size()==1 && 
-        if(token[0]=="exit") {
+        
+        if(token[0]=="PASV") {
+
+        }
+
+        if(token[0]=="exit" || token[0]=="QUIT") {
             signal(SIGCHLD,SIG_IGN);
             rl_clear_history();
-            exit(0);
+            break;
         }
 
-        if(token[0]=="cd") {
-            if(token.size()>2) {
-                std::cout << "cd: 参数太多" << std::endl;
-                continue;
-            }
-            cd(token[1]);
-            continue;
-        }
+        run_cmd(pasv,token);
 
-        if(token[0]=="ls") {
-            std::vector<char*> argv;
-            int argc=0;
-            now_path=now_path+"/ls";
-            argv.push_back(now_path.data());
-            argc++;
-            for(auto& s : token) {
-                if(s=="ls") continue;
-                argv.push_back(s.data());
-                argc++;
-            }
-
-            // if(argv.size()==1) {
-
-            // }
-            // argv.push_back(nullptr);
-
-            startls(argc,argv.data());
-            // cd(token[1]);
-            continue;
-        }
-
-        run_cmd(token);
-
+        // sock->sendMsg("stop");
     }
     return 0;
 }
