@@ -114,17 +114,19 @@ std::vector<std::string> gettoken(std::string input) {
     return token;
 }
 
-int run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
+bool run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
     running=1;
     auto path=std::filesystem::current_path();
     std::string now_path=path.string();
     int status;
-
+// 在这里使用数据连接，实现LIST、STOR、RETR的接收
     if(token[0]=="cd" || token[0]=="CWD") {
         if(token.size()>2) {
             std::cout << "CWD: 参数太多" << std::endl;
         }
         cd(token[1]);
+        running=0;
+        return false;
     }
 
     if(token[0]=="ls" || token[0]=="LIST") {
@@ -141,15 +143,21 @@ int run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
         std::vector<std::string> ls_res;
         ls_res=startls(argc,argv.data());
 
+        pasv->sendMsg("start_ls");
+        for (const std::string& s : ls_res) {
+            // std::cout << s << std::endl;
+            pasv->sendMsg(s);
+        }
+        pasv->sendMsg("stop");
     }
     running=0;
-    return 0;
+    return true;
 }
 
 int start_client() {
     handle_signal();
     TcpClient client;
-    if (!client.connectToHost("127.0.0.1", 2100)) {
+    if(!client.connectToHost("127.0.0.1", 2100)) {
         std::cerr << "[FAIL] connectToHost failed\n";
         return 1;
     }
@@ -160,14 +168,17 @@ int start_client() {
         return 1;
     }
     chdir(getenv("HOME"));
+
+    bool pasving=false;
+    TcpClient dataClient;
+    TcpSocket* pasv;
     while(1) {
         // auto path=std::filesystem::current_path();
         // std::string now_path=path.string();
         std::string now_path;
         sock->recvMsg(now_path);
 
-
-        std::string prompt="ftp >> server:\033[34m" + now_path + "\033[0m ";
+        std::string prompt="ftp client >> server:\033[34m" + now_path + "\033[0m ";
 
         char *inp=NULL;
         inp=readline(prompt.c_str());
@@ -182,39 +193,100 @@ int start_client() {
         }
         add_history(input.c_str());
 
-        if(!input.empty()) sock->sendMsg(input);
+        if(!input.empty()) {
+            sock->sendMsg(input);
+        } else {
+            continue;
+        }
 
         std::string res;
         sock->recvMsg(res);
         std::cout << res << std::endl;
 
-        // while(true) {
-        //     std::string ech;
-        //     sock->recvMsg(ech);
-        //     if(ech=="stop") break;
-        //     if(ech=="ls_start") {
-        //         while(true) {
-        //             std::string rec;
-        //             sock->recvMsg(rec);
-        //             if(rec=="ls_stop") {
-        //                 break;
-        //             } else {
-        //                 std::cout << rec << std::endl;
-        //             }
-        //         }
-        //     } else if(ech=="pasv_start") {
+        if(pasving) {
+            // 在这里使用数据连接，实现LIST、STOR、RETR的接收
+            std::string msa;
+            
+            pasv->recvMsg(msa);
+            if(msa=="start_ls") {
+                while(true) {
+                    std::string ls_res;
+                    pasv->recvMsg(ls_res);
+                    if(ls_res=="stop") break;
+                    std::cout << ls_res << std::endl;
+                }
+            } else if(msa=="start_stor") {
+                // break;
+            } else {
+                // continue;
+            }
 
-        //     }
-        // }
+            pasving = false;
+            continue;
+        }
+
+        if(input=="PASV") {
+            pasving=true;
+            std::string reply;
+            sock->recvMsg(reply);
+
+            int h1,h2,h3,h4,p1,p2;
+
+            sscanf(reply.c_str(),
+                "227 entering passive mode (%d,%d,%d,%d,%d,%d)",
+                &h1,&h2,&h3,&h4,&p1,&p2
+            );
+
+            int port = p1*256 + p2;
+            std::string ip =
+                std::to_string(h1) + "." +
+                std::to_string(h2) + "." +
+                std::to_string(h3) + "." +
+                std::to_string(h4);
+
+            std::cout << "ip = " << ip << std::endl;
+            std::cout << "port = " << port << std::endl;
+
+            if(!dataClient.connectToHost(ip.c_str(),port)) {
+                std::cerr << "data connect failed\n";
+                return 1;
+            }
+
+            std::cout << "[DATA] connected\n";
+            pasv = dataClient.getSocket();
+            // std::cout << "[DATA] send success\n";
+            continue;
+        }
 
         if(input=="exit") {
             signal(SIGCHLD,SIG_IGN);
             rl_clear_history();
-            // exit(0);
             break;
         }
     }
     return 0;
+}
+
+std::string path_msg(TcpSocket* sock) {
+    auto path=std::filesystem::current_path();
+    std::string now_path=path.string();
+    sock->sendMsg(now_path);
+
+    std::string msg;
+    if(sock->recvMsg(msg) != 0) {
+        std::cout << "[INFO] client disconnected or recv failed\n";
+        return nullptr;
+    }
+    std::cout << "[INFO] recv: " << msg << "\n";
+    if(msg == "QUIT") {
+        sock->sendMsg("BYE");
+        return nullptr;
+    }
+    if(sock->sendMsg("ACK: " + msg) != 0) {
+        std::cerr << "[FAIL] sendMsg failed\n";
+        return nullptr;
+    }
+    return msg;
 }
 
 int start_server() {
@@ -237,32 +309,16 @@ int start_server() {
     std::cout << "[PASS] client connected\n";
 
     TcpSocket* sock = server.getSocket();
-    TcpSocket* pasv;
+
     if(sock == nullptr) {
         std::cerr << "[FAIL] getSocket returned nullptr\n";
         return 1;
     }
 
     while(true) {
-        auto path=std::filesystem::current_path();
-        std::string now_path=path.string();
-        sock->sendMsg(now_path);
-
-        std::string msg;
-        if(sock->recvMsg(msg) != 0) {
-            std::cout << "[INFO] client disconnected or recv failed\n";
-            break;
-        }
-        std::cout << "[INFO] recv: " << msg << "\n";
-        if(msg == "QUIT") {
-            sock->sendMsg("BYE");
-            break;
-        }
-        if(sock->sendMsg("ACK: " + msg) != 0) {
-            std::cerr << "[FAIL] sendMsg failed\n";
-            break;
-        }
-
+        TcpServer dataServer;
+        TcpSocket* pasv;
+        std::string msg=path_msg(sock);
         std::vector<std::string> token;
         token=gettoken(msg);
 
@@ -272,6 +328,50 @@ int start_server() {
         
         if(token[0]=="PASV") {
 
+            sockaddr_in addr;
+
+            if(!dataServer.setListen(0)) {
+                std::cerr << "data listen failed\n";
+                return 1;
+            }
+
+            std::cout << "[INFO] data listening...\n";
+            unsigned short dataPort = dataServer.getPort();
+            if(dataPort != 0) {
+                int p1 = dataPort/256;
+                int p2 = dataPort%256;
+                std::string reply = "227 entering passive mode (127,0,0,1," 
+                    + std::to_string(p1) + "," + std::to_string(p2) + ")";
+
+                sock->sendMsg(reply);
+            }
+
+            if(!dataServer.acceptConn()) {
+                std::cerr << "[FAIL] acceptConn failed\n";
+                return 1;
+            }
+
+            std::cout << "[PASS] client connected\n";
+            pasv = dataServer.getSocket();
+            std::cout << "[DATA] waiting data connection...\n";
+
+            std::string cmd1 = path_msg(sock) ;
+            std::cout << "[DATA] recv => " << cmd1 << "\n";
+            std::vector<std::string> cmd2 = gettoken(cmd1);
+// 在run_cmd使用数据连接，实现LIST、STOR、RETR的发送
+            bool used = false;
+            while(!used) {
+                used = run_cmd(pasv,cmd2);
+            }
+            dataServer.~TcpServer();
+            pasv->~TcpSocket();
+        }
+
+        if(token[0]=="cd" || token[0]=="CWD") {
+            if(token.size()>2) {
+                std::cout << "CWD: 参数太多" << std::endl;
+            }
+            cd(token[1]);
         }
 
         if(token[0]=="exit" || token[0]=="QUIT") {
@@ -280,9 +380,6 @@ int start_server() {
             break;
         }
 
-        run_cmd(pasv,token);
-
-        // sock->sendMsg("stop");
     }
     return 0;
 }

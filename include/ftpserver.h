@@ -9,6 +9,8 @@ class TcpServer {
 
   TcpSocket* getSocket() const { return socket_.get(); }
 
+  unsigned short getPort();
+
   bool setListen(unsigned short port);
 
   bool acceptConn();

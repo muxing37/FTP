@@ -25,6 +25,17 @@ bool TcpServer::setListen(unsigned short port) {
   return true;
 }
 
+unsigned short TcpServer::getPort() {
+  sockaddr_in addr;
+  socklen_t len = sizeof(addr);
+
+  if(getsockname(listenfd_,(sockaddr*)&addr,&len) == -1) {
+    return 0;
+  }
+
+  return ntohs(addr.sin_port);
+}
+
 bool TcpServer::acceptConn() {
 
   sockaddr_in cliaddr;
