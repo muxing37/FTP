@@ -128,7 +128,19 @@ bool run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
         running=0;
         return false;
     }
+    
+    if(token[0]=="STOR") {
+        pasv->sendMsg("start_stor");
+        pasv->sendMsg(token[1]);
+        pasv->recvFile(token[1]);
+    }
 
+    if(token[0]=="RETR") {
+        pasv->sendMsg("start_retr");
+        pasv->sendMsg(token[1]);
+        pasv->sendFile(token[1]);
+    }
+    
     if(token[0]=="ls" || token[0]=="LIST") {
         std::vector<char*> argv;
         int argc=0;
@@ -167,7 +179,8 @@ int start_client() {
         std::cerr << "[FAIL] socket null\n";
         return 1;
     }
-    chdir(getenv("HOME"));
+    std::string workpath=std::string(getenv("HOME")) + "/Download";
+    chdir(workpath.c_str());
 
     bool pasving=false;
     TcpClient dataClient;
@@ -206,7 +219,7 @@ int start_client() {
         if(pasving) {
             // 在这里使用数据连接，实现LIST、STOR、RETR的接收
             std::string msa;
-            
+            std::cout << "|||" << std::endl;
             pasv->recvMsg(msa);
             if(msa=="start_ls") {
                 while(true) {
@@ -216,11 +229,14 @@ int start_client() {
                     std::cout << ls_res << std::endl;
                 }
             } else if(msa=="start_stor") {
-                // break;
-            } else {
-                // continue;
+                std::string path;
+                pasv->recvMsg(path);
+                pasv->sendFile(path);
+            } else if(msa=="start_retr") {
+                std::string path;
+                pasv->recvMsg(path);
+                pasv->recvFile(path);
             }
-
             pasving = false;
             continue;
         }

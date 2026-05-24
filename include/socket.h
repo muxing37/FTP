@@ -15,6 +15,9 @@ class TcpSocket {
   int sendMsg(std::string msg);
   int recvMsg(std::string& msg);
 
+  int sendFile(std::string& path);
+  int recvFile(std::string& path);
+
   private:
   int sockfd_;
 };
