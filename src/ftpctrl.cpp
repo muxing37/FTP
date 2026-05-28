@@ -1,10 +1,11 @@
 #include "ftpctrl.h"
+#include "socket.h"
 #include "ftpserver.h"
 #include "ftpclient.h"
 #include "ftpls.h"
+#include <thread>
 
 #define MAX_PATH 1024
-
 int running=0;
 
 struct oldcwd {
@@ -12,28 +13,160 @@ struct oldcwd {
     int set;
 };
 
-int cd(std::string s) {
-    static struct oldcwd last_path={0};
-    char t[MAX_PATH]={0};
-    getcwd(t,sizeof(t));
-    if(s=="-") {
-        if(last_path.set==0) {
-            printf("cd: OLDPWD 未设定\n");
-            return -1;
-        } else {
-            printf("%s\n",last_path.path);
-            chdir(last_path.path);
+class FtpSession {
+public:
+
+    FtpSession(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
+        pasvReady_ = false;
+        loggedIn_ = false;
+        binaryMode_ = true;
+        transferring_ = false;
+    }
+
+    void start() {
+        while(true) {
+            auto path=std::filesystem::current_path();
+            std::string now_path=path.string();
+            ctrlSock_->sendMsg(now_path);
+
+            std::string msg;
+            if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
+                std::cout << "[INFO] client disconnected or recv failed\n";
+            }
+            std::cout << "[INFO] recv: " << msg << "\n";
+            if(msg == "QUIT") {
+                ctrlSock_->sendMsg("BYE");
+            }
+            if(ctrlSock_->sendMsg("ACK: " + msg) != NetResult::OK) {
+                std::cerr << "[FAIL] sendMsg failed\n";
+            }
+
+            std::vector<std::string> token;
+            token=gettoken(msg);
+
+            if(token.size()==0) {
+                continue;
+            }
+            
+            if(token[0]=="PASV") {
+                doPASV();
+                continue;
+            }
+
+            if(token[0]=="cd" || token[0]=="CWD") {
+                if(token.size()>2) {
+                    std::cout << "CWD: 参数太多" << std::endl;
+                }
+                doCWD(token[1]);
+                continue;
+            }
+
+            if(token[0]=="exit" || token[0]=="QUIT") {
+                signal(SIGCHLD,SIG_IGN);
+                rl_clear_history();
+                break;
+            }
+        }
+    }
+
+private:
+
+    bool run_cmd(std::vector<std::string> token) {
+        running=1;
+        auto path=std::filesystem::current_path();
+        std::string now_path=path.string();
+        int status;
+    // 在这里使用数据连接，实现LIST、STOR、RETR的接收
+        
+        if(token[0]=="STOR") {
+            pasv->sendMsg("start_stor");
+            pasv->sendMsg(token[1]);
+            pasv->recvFile(token[1]);
+        }
+
+        if(token[0]=="RETR") {
+            pasv->sendMsg("start_retr");
+            pasv->sendMsg(token[1]);
+            pasv->sendFile(token[1]);
+        }
+        
+        if(token[0]=="ls" || token[0]=="LIST") {
+            std::vector<char*> argv;
+            int argc=0;
+            now_path=now_path+"/ls";
+            argv.push_back(now_path.data());
+            argc++;
+            for(auto& s : token) {
+                if(s=="ls" || s=="LIST") continue;
+                argv.push_back(s.data());
+                argc++;
+            }
+            std::vector<std::string> ls_res;
+            ls_res=startls(argc,argv.data());
+
+            NetResult a;
+            a = pasv->sendMsg("start_ls");
+
+            for (const std::string& s : ls_res) {
+                pasv->sendMsg(s);
+            }
+            pasv->sendMsg("stop");
+        }
+        running=0;
+        return true;
+    }
+
+    std::vector<std::string> gettoken(std::string input) {
+        std::vector<std::string> token;
+        std::string current;
+
+        for(char c : input) {
+            if(c == ' ') {
+                if(!current.empty()) {
+                    token.push_back(current);
+                    current.clear();
+                }
+            } else {
+                current += c;
+            }
+        }
+        if(!current.empty()) {
+            token.push_back(current);
+        }
+        return token;
+    }
+
+private:
+    bool doCWD(std::string s) {
+        static struct oldcwd last_path={0};
+        char t[MAX_PATH]={0};
+        getcwd(t,sizeof(t));
+        if(s=="-") {
+            if(last_path.set==0) {
+                printf("cd: OLDPWD 未设定\n");
+                return -1;
+            } else {
+                printf("%s\n",last_path.path);
+                chdir(last_path.path);
+                strcpy(last_path.path,t);
+                last_path.set=1;
+                return 0;
+            }
+        }
+        const char *str=s.c_str();
+        if(str[0]=='~') {
+            char temp[MAX_PATH]={0};
+            strcpy(temp,getenv("HOME"));
+            strcat(temp,str+1);
+            if(chdir(temp)==-1) {
+                perror("cd: ");
+            }
             strcpy(last_path.path,t);
             last_path.set=1;
             return 0;
         }
-    }
-    const char *str=s.c_str();
-    if(str[0]=='~') {
-        char temp[MAX_PATH]={0};
-        strcpy(temp,getenv("HOME"));
-        strcat(temp,str+1);
-        if(chdir(temp)==-1) {
+
+        if(chdir(str)==-1) {
             perror("cd: ");
         }
         strcpy(last_path.path,t);
@@ -41,15 +174,79 @@ int cd(std::string s) {
         return 0;
     }
 
-    if(chdir(str)==-1) {
-        perror("cd: ");
-    }
-    strcpy(last_path.path,t);
-    last_path.set=1;
-    return 0;
-}
+    bool doPASV() {
+        TcpServer dataServer;
+        // std::unique_ptr<TcpSocket> pasv;
+        sockaddr_in addr;
+        if(!dataServer.setListen(0)) {
+            std::cerr << "data listen failed\n";
+            // return 1;
+        }
 
-void handle_SIGINT() {
+        std::cout << "[INFO] data listening...\n";
+        unsigned short dataPort = dataServer.getPort();
+        if(dataPort != 0) {
+            int p1 = dataPort/256;
+            int p2 = dataPort%256;
+            std::string reply = "227 entering passive mode (127,0,0,1," 
+                + std::to_string(p1) + "," + std::to_string(p2) + ")";
+
+            ctrlSock_->sendMsg(reply);
+        }
+
+        if(pasv = dataServer.acceptConn()) {
+            std::cerr << "[FAIL] acceptConn failed\n";
+            // return 1;
+        }
+
+        std::cout << "[PASS] client connected\n";
+        // pasv = dataServer.getSocket();
+        std::cout << "[DATA] waiting data connection...\n";
+
+        std::string cmd1;
+
+        auto pat=std::filesystem::current_path();
+        std::string now_pat=pat.string();
+        ctrlSock_->sendMsg(now_pat);
+
+        if(ctrlSock_->recvMsg(cmd1) != NetResult::OK) {
+        std::cout << "[INFO] client disconnected or recv failed\n";
+        }
+        std::cout << "[INFO] recv: " << cmd1 << "\n";
+        if(cmd1 == "QUIT") {
+        ctrlSock_->sendMsg("BYE");
+        }
+        if(ctrlSock_->sendMsg("ACK: " + cmd1) != NetResult::OK) {
+        std::cerr << "[FAIL] sendMsg failed\n";
+        }
+
+        std::cout << "[DATA] recv => " << cmd1 << "\n";
+        std::vector<std::string> cmd2 = gettoken(cmd1);
+        bool used = false;
+        while(!used) {
+            run_cmd(cmd2);
+            used=true;
+        }
+        dataServer.~TcpServer();
+        // pasv->~TcpSocket();
+        return true;
+    }
+
+
+private:
+    std::unique_ptr<TcpSocket> ctrlSock_;
+    std::unique_ptr<TcpSocket> pasv;
+
+
+private:
+    bool pasvReady_;
+    bool loggedIn_;
+    bool binaryMode_;
+    bool transferring_;
+};
+
+
+void handle_SIGINT(int sig) {
     struct timespec stop;
     stop.tv_sec=0;
     stop.tv_nsec=2000000;
@@ -62,108 +259,20 @@ void handle_SIGINT() {
     }
 }
 
-void handle_SIGTSTP() {
+void handle_SIGTSTP(int sig) {
     if(running==1) {
         printf("\n");
-        // rl_replace_line("",0);
-        // rl_on_new_line();
-        // rl_redisplay();
     }
 }
-
-void handle_SIGCHLD() {
-    int status;
-    pid_t pid;
-    pid=waitpid(-1,&status,WNOHANG);
-}
-
-void handle_SIGINT(int sig) {}
-void handle_SIGTSTP(int sig) {}
-void handle_SIGCHLD(int sig) {}
 
 void handle_signal(){
     signal(SIGINT,handle_SIGINT);
     signal(SIGTSTP,handle_SIGTSTP);
-    signal(SIGCHLD,handle_SIGCHLD);
 }
 
 void restore_signal() {
     signal(SIGINT,SIG_DFL);
     signal(SIGTSTP,SIG_DFL);
-}
-
-std::vector<std::string> gettoken(std::string input) {
-    std::vector<std::string> token;
-    std::string current;
-
-    for(char c : input) {
-        if(c == ' ') {
-            if(!current.empty()) {
-                token.push_back(current);
-                current.clear();
-            }
-        } else {
-            current += c;
-        }
-    }
-
-    if(!current.empty()) {
-        token.push_back(current);
-    }
-
-    return token;
-}
-
-bool run_cmd(TcpSocket* pasv,std::vector<std::string> token) {
-    running=1;
-    auto path=std::filesystem::current_path();
-    std::string now_path=path.string();
-    int status;
-// 在这里使用数据连接，实现LIST、STOR、RETR的接收
-    if(token[0]=="cd" || token[0]=="CWD") {
-        if(token.size()>2) {
-            std::cout << "CWD: 参数太多" << std::endl;
-        }
-        cd(token[1]);
-        running=0;
-        return false;
-    }
-    
-    if(token[0]=="STOR") {
-        pasv->sendMsg("start_stor");
-        pasv->sendMsg(token[1]);
-        pasv->recvFile(token[1]);
-    }
-
-    if(token[0]=="RETR") {
-        pasv->sendMsg("start_retr");
-        pasv->sendMsg(token[1]);
-        pasv->sendFile(token[1]);
-    }
-    
-    if(token[0]=="ls" || token[0]=="LIST") {
-        std::vector<char*> argv;
-        int argc=0;
-        now_path=now_path+"/ls";
-        argv.push_back(now_path.data());
-        argc++;
-        for(auto& s : token) {
-            if(s=="ls" || s=="LIST") continue;
-            argv.push_back(s.data());
-            argc++;
-        }
-        std::vector<std::string> ls_res;
-        ls_res=startls(argc,argv.data());
-
-        pasv->sendMsg("start_ls");
-        for (const std::string& s : ls_res) {
-            // std::cout << s << std::endl;
-            pasv->sendMsg(s);
-        }
-        pasv->sendMsg("stop");
-    }
-    running=0;
-    return true;
 }
 
 int start_client() {
@@ -180,16 +289,15 @@ int start_client() {
         return 1;
     }
     std::string workpath=std::string(getenv("HOME")) + "/Download";
+    mkdir(workpath.c_str(),0755);
     chdir(workpath.c_str());
 
     bool pasving=false;
     TcpClient dataClient;
     TcpSocket* pasv;
     while(1) {
-        // auto path=std::filesystem::current_path();
-        // std::string now_path=path.string();
         std::string now_path;
-        sock->recvMsg(now_path);
+        if(sock->recvMsg(now_path) != NetResult::OK) continue;
 
         std::string prompt="ftp client >> server:\033[34m" + now_path + "\033[0m ";
 
@@ -217,10 +325,11 @@ int start_client() {
         std::cout << res << std::endl;
 
         if(pasving) {
-            // 在这里使用数据连接，实现LIST、STOR、RETR的接收
             std::string msa;
-            std::cout << "|||" << std::endl;
             pasv->recvMsg(msa);
+
+            std::cout << msa << std::endl;
+
             if(msa=="start_ls") {
                 while(true) {
                     std::string ls_res;
@@ -237,6 +346,7 @@ int start_client() {
                 pasv->recvMsg(path);
                 pasv->recvFile(path);
             }
+
             pasving = false;
             continue;
         }
@@ -247,7 +357,6 @@ int start_client() {
             sock->recvMsg(reply);
 
             int h1,h2,h3,h4,p1,p2;
-
             sscanf(reply.c_str(),
                 "227 entering passive mode (%d,%d,%d,%d,%d,%d)",
                 &h1,&h2,&h3,&h4,&p1,&p2
@@ -267,10 +376,8 @@ int start_client() {
                 std::cerr << "data connect failed\n";
                 return 1;
             }
-
             std::cout << "[DATA] connected\n";
             pasv = dataClient.getSocket();
-            // std::cout << "[DATA] send success\n";
             continue;
         }
 
@@ -283,119 +390,29 @@ int start_client() {
     return 0;
 }
 
-std::string path_msg(TcpSocket* sock) {
-    auto path=std::filesystem::current_path();
-    std::string now_path=path.string();
-    sock->sendMsg(now_path);
-
-    std::string msg;
-    if(sock->recvMsg(msg) != 0) {
-        std::cout << "[INFO] client disconnected or recv failed\n";
-        return nullptr;
-    }
-    std::cout << "[INFO] recv: " << msg << "\n";
-    if(msg == "QUIT") {
-        sock->sendMsg("BYE");
-        return nullptr;
-    }
-    if(sock->sendMsg("ACK: " + msg) != 0) {
-        std::cerr << "[FAIL] sendMsg failed\n";
-        return nullptr;
-    }
-    return msg;
-}
-
 int start_server() {
     chdir(getenv("HOME"));
-    int if_pasv=0;
     TcpServer server;
 
     if(!server.setListen(2100)) {
         std::cerr << "[FAIL] setListen failed\n";
         return 1;
     }
-
     std::cout << "[INFO] server listening on port 2100...\n";
 
-    if(!server.acceptConn()) {
-        std::cerr << "[FAIL] acceptConn failed\n";
-        return 1;
-    }
-
-    std::cout << "[PASS] client connected\n";
-
-    TcpSocket* sock = server.getSocket();
-
-    if(sock == nullptr) {
-        std::cerr << "[FAIL] getSocket returned nullptr\n";
-        return 1;
-    }
-
     while(true) {
-        TcpServer dataServer;
-        TcpSocket* pasv;
-        std::string msg=path_msg(sock);
-        std::vector<std::string> token;
-        token=gettoken(msg);
-
-        if(token.size()==0) {
+        auto sock = server.acceptConn();
+        if(!sock) {
             continue;
-        }
-        
-        if(token[0]=="PASV") {
-
-            sockaddr_in addr;
-
-            if(!dataServer.setListen(0)) {
-                std::cerr << "data listen failed\n";
-                return 1;
-            }
-
-            std::cout << "[INFO] data listening...\n";
-            unsigned short dataPort = dataServer.getPort();
-            if(dataPort != 0) {
-                int p1 = dataPort/256;
-                int p2 = dataPort%256;
-                std::string reply = "227 entering passive mode (127,0,0,1," 
-                    + std::to_string(p1) + "," + std::to_string(p2) + ")";
-
-                sock->sendMsg(reply);
-            }
-
-            if(!dataServer.acceptConn()) {
-                std::cerr << "[FAIL] acceptConn failed\n";
-                return 1;
-            }
-
+        } else {
             std::cout << "[PASS] client connected\n";
-            pasv = dataServer.getSocket();
-            std::cout << "[DATA] waiting data connection...\n";
-
-            std::string cmd1 = path_msg(sock) ;
-            std::cout << "[DATA] recv => " << cmd1 << "\n";
-            std::vector<std::string> cmd2 = gettoken(cmd1);
-// 在run_cmd使用数据连接，实现LIST、STOR、RETR的发送
-            bool used = false;
-            while(!used) {
-                used = run_cmd(pasv,cmd2);
+        }
+        std::thread([sock = std::move(sock)]() mutable {
+                FtpSession session(std::move(sock));
+                session.start();
             }
-            dataServer.~TcpServer();
-            pasv->~TcpSocket();
-        }
-
-        if(token[0]=="cd" || token[0]=="CWD") {
-            if(token.size()>2) {
-                std::cout << "CWD: 参数太多" << std::endl;
-            }
-            cd(token[1]);
-        }
-
-        if(token[0]=="exit" || token[0]=="QUIT") {
-            signal(SIGCHLD,SIG_IGN);
-            rl_clear_history();
-            break;
-        }
-
+        ).detach();
     }
+
     return 0;
 }

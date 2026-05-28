@@ -7,16 +7,24 @@
 #include <iostream>
 #include <string>
 
+enum class NetResult {
+  OK,
+  TIMEOUT,
+  SEND_ERROR,
+  RECV_ERROR,
+  FILE_ERROR
+};
+
 class TcpSocket {
   public:
   TcpSocket(int sockfd);
   ~TcpSocket();
 
-  int sendMsg(std::string msg);
-  int recvMsg(std::string& msg);
+  NetResult sendMsg(std::string msg);
+  NetResult recvMsg(std::string& msg);
 
-  int sendFile(std::string& path);
-  int recvFile(std::string& path);
+  NetResult sendFile(std::string& path);
+  NetResult recvFile(std::string& path);
 
   private:
   int sockfd_;

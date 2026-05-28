@@ -7,15 +7,16 @@ class TcpServer {
   TcpServer();
   ~TcpServer();
 
-  TcpSocket* getSocket() const { return socket_.get(); }
+  // TcpSocket* getSocket() const { return socket_.get(); }
 
   unsigned short getPort();
 
   bool setListen(unsigned short port);
 
-  bool acceptConn();
+  // bool acceptConn();
+  std::unique_ptr<TcpSocket> acceptConn();
 
   private:
   int listenfd_;
-  std::unique_ptr<TcpSocket> socket_;
+  // std::unique_ptr<TcpSocket> socket_;
 };

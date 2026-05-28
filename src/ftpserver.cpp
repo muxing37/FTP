@@ -1,7 +1,7 @@
 #include "ftpserver.h"
 
 TcpServer::TcpServer()
-    : listenfd_(socket(AF_INET, SOCK_STREAM, 0)), socket_(nullptr) {}
+    : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
 
 TcpServer::~TcpServer() {
   if (listenfd_ != -1) {
@@ -36,18 +36,30 @@ unsigned short TcpServer::getPort() {
   return ntohs(addr.sin_port);
 }
 
-bool TcpServer::acceptConn() {
-
+std::unique_ptr<TcpSocket> TcpServer::acceptConn() {
   sockaddr_in cliaddr;
-  socklen_t len=sizeof(cliaddr);
+  socklen_t len = sizeof(cliaddr);
+  int fd = accept(listenfd_,(sockaddr*)&cliaddr,&len);
 
-  int connfd=accept(listenfd_,(sockaddr*)&cliaddr,&len);
-
-  if(connfd<0) {
-    return false;
+  if(fd < 0) {
+    return nullptr;
   }
 
-  socket_=std::make_unique<TcpSocket>(connfd);
-
-  return true;
+  return std::make_unique<TcpSocket>(fd);
 }
+
+// bool TcpServer::acceptConn() {
+
+//   sockaddr_in cliaddr;
+//   socklen_t len=sizeof(cliaddr);
+
+//   int connfd=accept(listenfd_,(sockaddr*)&cliaddr,&len);
+
+//   if(connfd<0) {
+//     return false;
+//   }
+
+//   socket_=std::make_unique<TcpSocket>(connfd);
+
+//   return true;
+// }

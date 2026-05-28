@@ -39,29 +39,29 @@ int send_all(int fd,void *buf,size_t len) {
   return total;
 }
 
-int TcpSocket::sendMsg(std::string msg) {
+NetResult TcpSocket::sendMsg(std::string msg) {
   uint32_t l=msg.size();
   uint32_t len=htonl(l);
 
   if(send_all(sockfd_,&len,sizeof(len))!=sizeof(len)) {
-    return -1;
+    return NetResult::SEND_ERROR;
   }
   
   if(send_all(sockfd_,msg.data(),msg.size())!=(int)msg.size()) {
-    return -1;
+    return NetResult::SEND_ERROR;
   }
-  return 0;
+  return NetResult::OK;
 }
 
-int TcpSocket::sendFile(std::string& path) {
+NetResult TcpSocket::sendFile(std::string& path) {
   int fd = open(path.c_str(), O_RDONLY);
   if(fd < 0) {
-    return -1;
+    return NetResult::FILE_ERROR;
   }
   struct stat st;
   if(fstat(fd, &st) == -1) {
     close(fd);
-    return -1;
+    return NetResult::FILE_ERROR;
   }
 
   uint64_t filesize = st.st_size;
@@ -69,7 +69,7 @@ int TcpSocket::sendFile(std::string& path) {
 
   if(send_all(sockfd_,&netSize,sizeof(netSize))!= sizeof(netSize)) {
     close(fd);
-    return -1;
+    return NetResult::SEND_ERROR;
   }
   char buf[4096];
   while(true) {
@@ -77,18 +77,18 @@ int TcpSocket::sendFile(std::string& path) {
     if(n>0) {
       if(send_all(sockfd_,buf,n) != n) {
         close(fd);
-        return -1;
+        return NetResult::SEND_ERROR;
       }
     } else if(n==0) {
       break;
     } else {
       close(fd);
-      return -1;
+      return NetResult::SEND_ERROR;
     }
   }
 
   close(fd);
-  return 0;
+  return NetResult::OK;
 }
 
 int recv_all(int fd,void *buf,size_t len) {
@@ -110,20 +110,20 @@ int recv_all(int fd,void *buf,size_t len) {
   return total;
 }
 
-int TcpSocket::recvMsg(std::string& msg) {
+NetResult TcpSocket::recvMsg(std::string& msg) {
 
   msg.clear();
   uint32_t len=0;
   int ret=recv_all(sockfd_,&len,sizeof(len));
-  if(ret==0) return -1;
-  if(ret!=sizeof(len)) return -1;
+  if(ret==0) return NetResult::RECV_ERROR;
+  if(ret!=sizeof(len)) return NetResult::RECV_ERROR;
   
   uint32_t l=ntohl(len);
 
   const uint32_t MAX_LEN=100*1024*1024;
 
   if(l>MAX_LEN) {
-    return -1;
+    return NetResult::RECV_ERROR;
   }
 
   msg.resize(l);
@@ -133,17 +133,17 @@ int TcpSocket::recvMsg(std::string& msg) {
   if(ret!=(int)l) {
     close(sockfd_);
     sockfd_=-1;
-    return -1;
+    return NetResult::RECV_ERROR;
   }
 
-  return 0;
+  return NetResult::OK;
 }
 
-int TcpSocket::recvFile(std::string& path) {
+NetResult TcpSocket::recvFile(std::string& path) {
   int fd = open(path.c_str(),O_WRONLY | O_CREAT | O_TRUNC,0644);
 
   if(fd < 0) {
-    return -1;
+    return NetResult::RECV_ERROR;
   }
 
   uint64_t netSize = 0;
@@ -151,7 +151,7 @@ int TcpSocket::recvFile(std::string& path) {
 
   if(ret != sizeof(netSize)) {
     close(fd);
-    return -1;
+    return NetResult::RECV_ERROR;
   }
 
   uint64_t filesize = ntohll(netSize);
@@ -164,16 +164,16 @@ int TcpSocket::recvFile(std::string& path) {
 
     if(n <= 0) {
       close(fd);
-      return -1;
+      return NetResult::RECV_ERROR;
     }
 
     int written = write(fd, buf, n);
     if(written != n) {
       close(fd);
-      return -1;
+      return NetResult::RECV_ERROR;
     }
     remain -= n;
   }
   close(fd);
-  return 0;
+  return NetResult::OK;
 }
