@@ -40,7 +40,7 @@ public:
             if(ctrlSock_->sendMsg("ACK: " + msg) != NetResult::OK) {
                 std::cerr << "[FAIL] sendMsg failed\n";
             }
-
+            if(msg == "skip") continue;
             std::vector<std::string> token;
             token=gettoken(msg);
 
@@ -300,16 +300,17 @@ int start_client() {
         if(sock->recvMsg(now_path) != NetResult::OK) continue;
 
         std::string prompt="ftp client >> server:\033[34m" + now_path + "\033[0m ";
-
         char *inp=NULL;
         inp=readline(prompt.c_str());
+
         if(inp==NULL) {
             free(inp);
             continue;
         }
         std::string input(inp);
         free(inp);
-        if(input.size()==0) {
+        if(input.size()==0 || input.empty()) {
+            // sock->sendMsg("skip");
             continue;
         }
         add_history(input.c_str());
@@ -344,7 +345,9 @@ int start_client() {
             } else if(msa=="start_retr") {
                 std::string path;
                 pasv->recvMsg(path);
-                pasv->recvFile(path);
+                std::filesystem::path p(path);
+                std::string filename = p.filename().string();
+                pasv->recvFile(filename);
             }
 
             pasving = false;

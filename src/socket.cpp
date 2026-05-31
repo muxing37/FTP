@@ -1,5 +1,6 @@
 #include "socket.h"
 #include "ftpls.h"
+#include <chrono> 
 
 TcpSocket::TcpSocket(int sockfd) : sockfd_(sockfd) {}
 
@@ -32,7 +33,6 @@ int send_all(int fd,void *buf,size_t len) {
       return total;
     } else {
       if (errno == EINTR) continue;
-      // if (errno == EAGAIN || errno == EWOULDBLOCK) return -1;
       return -1;
     }
   }
@@ -72,6 +72,8 @@ NetResult TcpSocket::sendFile(std::string& path) {
     return NetResult::SEND_ERROR;
   }
   char buf[4096];
+  auto start = std::chrono::steady_clock::now();
+  uint64_t sent = 0;
   while(true) {
     int n = read(fd,buf,sizeof(buf));
     if(n>0) {
@@ -85,8 +87,16 @@ NetResult TcpSocket::sendFile(std::string& path) {
       close(fd);
       return NetResult::SEND_ERROR;
     }
-  }
+    sent += n;
 
+    double percent = 100.0 * sent / filesize;
+    auto now = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(now - start).count();
+    double speed = sent / 1024.0 / 1024.0 / seconds;
+    std::cout << "\rUploading: " << std::fixed << std::setprecision(1) << percent << "% " << speed << " MB/s" << std::flush;
+ 
+  }
+  std::cout << "\n";
   close(fd);
   return NetResult::OK;
 }
@@ -102,7 +112,6 @@ int recv_all(int fd,void *buf,size_t len) {
     } else if(n==0) {
       return total;
     } else {
-      // if(errno == EAGAIN || errno == EWOULDBLOCK) return -1;
       if(errno == EINTR) continue;
       return -1;
     }
@@ -157,23 +166,32 @@ NetResult TcpSocket::recvFile(std::string& path) {
   uint64_t filesize = ntohll(netSize);
   uint64_t remain = filesize;
 
-  char buf[4096];
+  std::vector<char> buf(1024 * 1024);
+  auto start = std::chrono::steady_clock::now();
   while(remain > 0) {
-    int chunk = remain > sizeof(buf) ? sizeof(buf) : remain;
-    int n = recv_all(sockfd_, buf, chunk);
+    int chunk = remain > buf.size() ? buf.size() : remain;
+    int n = recv_all(sockfd_, buf.data(), chunk);
 
     if(n <= 0) {
       close(fd);
       return NetResult::RECV_ERROR;
     }
 
-    int written = write(fd, buf, n);
+    int written = write(fd, buf.data(), n);
     if(written != n) {
       close(fd);
       return NetResult::RECV_ERROR;
     }
     remain -= n;
+    uint64_t received = filesize - remain;
+
+    double percent = 100.0 * received / filesize;
+    auto now = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(now - start).count();
+    double speed = received / 1024.0 / 1024.0 / seconds;
+    std::cout << "\rDownloading: " << std::fixed << std::setprecision(1) << percent << "% " << speed << " MB/s" << std::flush;
   }
+  std::cout << "\n";
   close(fd);
   return NetResult::OK;
 }
