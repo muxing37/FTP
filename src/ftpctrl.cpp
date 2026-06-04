@@ -18,26 +18,23 @@ public:
 
     FtpSession(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
         pasvReady_ = false;
-
     }
 
     void start() {
-        pasvReady_ = false;
         while(true) {
             std::string res;
             auto path=std::filesystem::current_path();
             std::string now_path=path.string();
-            // ctrlSock_->sendMsg(now_path);
             Msgpack n_path;
             n_path.type = MsgType::PATH_INFO;
             n_path.msg = now_path;
             ctrlSock_->sendMsgpack(n_path);
             ctrlSock_->recvMsg(res);
-            // if(res != "yes") {
-            //     std::cout << res << std::endl;
-            //     continue;
-            // }
-            // std::cout << res << std::endl;
+            if(res != "yes") {
+                std::cout << res << std::endl;
+                continue;
+            }
+            std::cout << res << std::endl;
 
             std::string msg;
             if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
@@ -58,6 +55,16 @@ public:
                 continue;
             }
 
+            if(token[0]=="PASV" || pasvReady_==true) {
+                if(pasvReady_==false) {
+                    doPASV();
+                    continue;
+                }
+                if(pasvReady_==true) {
+                    if(run_cmd(token)) continue;
+                }
+            }
+
             if(token[0]=="cd" || token[0]=="CWD") {
                 if(token.size()>2) {
                     std::cout << "CWD: 参数太多" << std::endl;
@@ -71,17 +78,7 @@ public:
                 rl_clear_history();
                 break;
             }
-        
-            if(token[0]=="PASV" || pasvReady_==true) {
-                if(pasvReady_==false) {
-                    doPASV();
-                    continue;
-                }
-                if(pasvReady_==true) {
-                    std::cout << "111\n";
-                    if(run_cmd(token)) continue;
-                }
-            }
+    
         }
     }
 
@@ -98,7 +95,6 @@ private:
             pasv->sendMsg("start_stor");
             pasv->sendMsg(token[1]);
             pasv->recvFile(token[1]);
-
             used = true;
         }
 
@@ -106,7 +102,6 @@ private:
             pasv->sendMsg("start_retr");
             pasv->sendMsg(token[1]);
             pasv->sendFile(token[1]);
-
             used = true;
         }
         
@@ -294,7 +289,7 @@ int start_client() {
         // if(sock->recvMsg(now_path) != NetResult::OK) continue;
         sock->recvMsgpack(n_path);
         if(n_path.type != MsgType::PATH_INFO) continue;
-        // else sock->sendMsg("yes");
+        else sock->sendMsg("yes");
 
         std::string prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
         char *inp=NULL;
@@ -325,7 +320,6 @@ int start_client() {
         if(pasving) {
             std::string msa;
             pasv->recvMsg(msa);
-
             std::cout << msa << std::endl;
 
             if(msa=="start_ls") {
@@ -335,19 +329,21 @@ int start_client() {
                     if(ls_res=="stop") break;
                     std::cout << ls_res << std::endl;
                 }
+                pasving = false;
             } else if(msa=="start_stor") {
                 std::string path;
                 pasv->recvMsg(path);
                 pasv->sendFile(path);
+                pasving = false;
             } else if(msa=="start_retr") {
                 std::string path;
                 pasv->recvMsg(path);
                 std::filesystem::path p(path);
                 std::string filename = p.filename().string();
                 pasv->recvFile(filename);
+                pasving = false;
             }
 
-            pasving = false;
             continue;
         }
 
