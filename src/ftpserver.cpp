@@ -40,7 +40,7 @@ std::unique_ptr<TcpSocket> TcpServer::acceptConn() {
   sockaddr_in cliaddr;
   socklen_t len = sizeof(cliaddr);
   int fd = accept(listenfd_,(sockaddr*)&cliaddr,&len);
-
+std::cout << fd << std::endl;
   if(fd < 0) {
     return nullptr;
   }

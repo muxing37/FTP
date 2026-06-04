@@ -53,8 +53,30 @@ NetResult TcpSocket::sendMsg(std::string msg) {
   return NetResult::OK;
 }
 
+NetResult  TcpSocket::sendMsgpack(Msgpack& msg) {
+  uint32_t type = static_cast<uint32_t>(msg.type);
+  uint32_t netType = htonl(type);
+  if(send_all(sockfd_,&netType,sizeof(netType)) != sizeof(netType)) {
+    return NetResult::SEND_ERROR;
+  }
+
+  uint32_t len = msg.msg.size();
+  uint32_t netLen = htonl(len);
+  if(send_all(sockfd_,&netLen,sizeof(netLen)) != sizeof(netLen)) {
+    return NetResult::SEND_ERROR;
+  }
+
+  if(len > 0) {
+    if(send_all(sockfd_,msg.msg.data(),len) != (int)len) {
+      return NetResult::SEND_ERROR;
+    }
+  }
+
+  return NetResult::OK;
+}
+
 NetResult TcpSocket::sendFile(std::string& path) {
-  int fd = open(path.c_str(), O_RDONLY);
+  int fd = open(path.c_str(),O_RDONLY);
   if(fd < 0) {
     return NetResult::FILE_ERROR;
   }
@@ -91,7 +113,7 @@ NetResult TcpSocket::sendFile(std::string& path) {
 
     double percent = 100.0 * sent / filesize;
     auto now = std::chrono::steady_clock::now();
-    double seconds = std::chrono::duration<double>(now - start).count();
+    double seconds = std::chrono::duration<double>(now-start).count();
     double speed = sent / 1024.0 / 1024.0 / seconds;
     std::cout << "\rUploading: " << std::fixed << std::setprecision(1) << percent << "% " << speed << " MB/s" << std::flush;
  
@@ -120,7 +142,6 @@ int recv_all(int fd,void *buf,size_t len) {
 }
 
 NetResult TcpSocket::recvMsg(std::string& msg) {
-
   msg.clear();
   uint32_t len=0;
   int ret=recv_all(sockfd_,&len,sizeof(len));
@@ -136,13 +157,34 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   }
 
   msg.resize(l);
-
   ret=recv_all(sockfd_,&msg[0],l);
-
   if(ret!=(int)l) {
     close(sockfd_);
     sockfd_=-1;
     return NetResult::RECV_ERROR;
+  }
+
+  return NetResult::OK;
+}
+
+NetResult TcpSocket::recvMsgpack(Msgpack& msg) {
+  uint32_t netType=0;
+  int ret = recv_all(sockfd_,&netType,sizeof(netType));
+  if(ret != sizeof(netType)) return NetResult::RECV_ERROR;
+  msg.type=static_cast<MsgType>(ntohl(netType));
+
+  uint32_t netLen = 0;
+  ret = recv_all(sockfd_,&netLen,sizeof(netLen));
+  if(ret != sizeof(netLen)) return NetResult::RECV_ERROR;
+  uint32_t len = ntohl(netLen);
+
+  const uint32_t MAX_LEN = 100*1024*1024;
+  if(len > MAX_LEN) return NetResult::RECV_ERROR;
+
+  msg.msg.resize(len);
+  if(len > 0) {
+    ret = recv_all(sockfd_,&msg.msg[0],len);
+    if(ret != (int)len) return NetResult::RECV_ERROR;
   }
 
   return NetResult::OK;

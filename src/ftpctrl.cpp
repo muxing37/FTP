@@ -18,16 +18,26 @@ public:
 
     FtpSession(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
         pasvReady_ = false;
-        loggedIn_ = false;
-        binaryMode_ = true;
-        transferring_ = false;
+
     }
 
     void start() {
+        pasvReady_ = false;
         while(true) {
+            std::string res;
             auto path=std::filesystem::current_path();
             std::string now_path=path.string();
-            ctrlSock_->sendMsg(now_path);
+            // ctrlSock_->sendMsg(now_path);
+            Msgpack n_path;
+            n_path.type = MsgType::PATH_INFO;
+            n_path.msg = now_path;
+            ctrlSock_->sendMsgpack(n_path);
+            ctrlSock_->recvMsg(res);
+            // if(res != "yes") {
+            //     std::cout << res << std::endl;
+            //     continue;
+            // }
+            // std::cout << res << std::endl;
 
             std::string msg;
             if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
@@ -47,11 +57,6 @@ public:
             if(token.size()==0) {
                 continue;
             }
-            
-            if(token[0]=="PASV") {
-                doPASV();
-                continue;
-            }
 
             if(token[0]=="cd" || token[0]=="CWD") {
                 if(token.size()>2) {
@@ -66,13 +71,24 @@ public:
                 rl_clear_history();
                 break;
             }
+        
+            if(token[0]=="PASV" || pasvReady_==true) {
+                if(pasvReady_==false) {
+                    doPASV();
+                    continue;
+                }
+                if(pasvReady_==true) {
+                    std::cout << "111\n";
+                    if(run_cmd(token)) continue;
+                }
+            }
         }
     }
 
 private:
 
     bool run_cmd(std::vector<std::string> token) {
-        running=1;
+        bool used = false;
         auto path=std::filesystem::current_path();
         std::string now_path=path.string();
         int status;
@@ -82,12 +98,16 @@ private:
             pasv->sendMsg("start_stor");
             pasv->sendMsg(token[1]);
             pasv->recvFile(token[1]);
+
+            used = true;
         }
 
         if(token[0]=="RETR") {
             pasv->sendMsg("start_retr");
             pasv->sendMsg(token[1]);
             pasv->sendFile(token[1]);
+
+            used = true;
         }
         
         if(token[0]=="ls" || token[0]=="LIST") {
@@ -111,9 +131,12 @@ private:
                 pasv->sendMsg(s);
             }
             pasv->sendMsg("stop");
+
+            used = true;
         }
-        running=0;
-        return true;
+        if(used) pasvReady_=false;
+        else pasv->sendMsg("not used");
+        return used;
     }
 
     std::vector<std::string> gettoken(std::string input) {
@@ -175,7 +198,7 @@ private:
     }
 
     bool doPASV() {
-        TcpServer dataServer;
+        // TcpServer dataServer;
         // std::unique_ptr<TcpSocket> pasv;
         sockaddr_in addr;
         if(!dataServer.setListen(0)) {
@@ -194,41 +217,12 @@ private:
             ctrlSock_->sendMsg(reply);
         }
 
-        if(pasv = dataServer.acceptConn()) {
-            std::cerr << "[FAIL] acceptConn failed\n";
-            // return 1;
-        }
+        pasv = dataServer.acceptConn();
 
         std::cout << "[PASS] client connected\n";
-        // pasv = dataServer.getSocket();
         std::cout << "[DATA] waiting data connection...\n";
 
-        std::string cmd1;
-
-        auto pat=std::filesystem::current_path();
-        std::string now_pat=pat.string();
-        ctrlSock_->sendMsg(now_pat);
-
-        if(ctrlSock_->recvMsg(cmd1) != NetResult::OK) {
-        std::cout << "[INFO] client disconnected or recv failed\n";
-        }
-        std::cout << "[INFO] recv: " << cmd1 << "\n";
-        if(cmd1 == "QUIT") {
-        ctrlSock_->sendMsg("BYE");
-        }
-        if(ctrlSock_->sendMsg("ACK: " + cmd1) != NetResult::OK) {
-        std::cerr << "[FAIL] sendMsg failed\n";
-        }
-
-        std::cout << "[DATA] recv => " << cmd1 << "\n";
-        std::vector<std::string> cmd2 = gettoken(cmd1);
-        bool used = false;
-        while(!used) {
-            run_cmd(cmd2);
-            used=true;
-        }
-        dataServer.~TcpServer();
-        // pasv->~TcpSocket();
+        pasvReady_ = true;
         return true;
     }
 
@@ -236,13 +230,12 @@ private:
 private:
     std::unique_ptr<TcpSocket> ctrlSock_;
     std::unique_ptr<TcpSocket> pasv;
+    TcpServer dataServer;
 
 
 private:
     bool pasvReady_;
-    bool loggedIn_;
-    bool binaryMode_;
-    bool transferring_;
+
 };
 
 
@@ -297,9 +290,13 @@ int start_client() {
     TcpSocket* pasv;
     while(1) {
         std::string now_path;
-        if(sock->recvMsg(now_path) != NetResult::OK) continue;
+        Msgpack n_path;
+        // if(sock->recvMsg(now_path) != NetResult::OK) continue;
+        sock->recvMsgpack(n_path);
+        if(n_path.type != MsgType::PATH_INFO) continue;
+        // else sock->sendMsg("yes");
 
-        std::string prompt="ftp client >> server:\033[34m" + now_path + "\033[0m ";
+        std::string prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
         char *inp=NULL;
         inp=readline(prompt.c_str());
 
