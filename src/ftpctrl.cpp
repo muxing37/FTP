@@ -12,9 +12,7 @@ struct oldcwd {
     char path[MAX_PATH];
     int set;
 };
-
-std::string prompt;
-
+    std::string prompt;
 class FtpSession {
 public:
 
@@ -37,7 +35,9 @@ public:
                 continue;
             }
             std::cout << res << std::endl;
-
+            break;
+        }
+        while(true) {
             std::string msg;
             if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
                 std::cout << "[INFO] client disconnected or recv failed\n";
@@ -191,16 +191,30 @@ private:
         }
         strcpy(last_path.path,t);
         last_path.set=1;
+
+        while(true) {
+            std::string res;
+            auto path=std::filesystem::current_path();
+            std::string now_path=path.string();
+            Msgpack n_path;
+            n_path.type = MsgType::PATH_INFO;
+            n_path.msg = now_path;
+            ctrlSock_->sendMsgpack(n_path);
+            ctrlSock_->recvMsg(res);
+            if(res != "yes") {
+                std::cout << res << std::endl;
+                continue;
+            }
+            std::cout << res << std::endl;
+            break;
+        }
         return 0;
     }
 
     bool doPASV() {
-        // TcpServer dataServer;
-        // std::unique_ptr<TcpSocket> pasv;
         sockaddr_in addr;
         if(!dataServer.setListen(0)) {
             std::cerr << "data listen failed\n";
-            // return 1;
         }
 
         std::cout << "[INFO] data listening...\n";
@@ -232,7 +246,6 @@ private:
 
 private:
     bool pasvReady_;
-
 };
 
 
@@ -241,8 +254,8 @@ void handle_SIGINT(int sig) {
     stop.tv_sec=0;
     stop.tv_nsec=2000000;
     nanosleep(&stop,NULL);
-    printf("\n111");
-    std::cout << prompt;
+    printf("\n");
+    // std::cout << prompt;
     // if(running==0) {
     //     rl_replace_line("",0);
     //     rl_on_new_line();
@@ -268,7 +281,7 @@ void restore_signal() {
 
 int start_client() {
     handle_signal();
-    
+
     TcpClient client;
     if(!client.connectToHost("127.0.0.1", 2100)) {
         std::cerr << "[FAIL] connectToHost failed\n";
@@ -287,7 +300,8 @@ int start_client() {
     bool pasving=false;
     TcpClient dataClient;
     TcpSocket* pasv;
-    while(1) {
+
+    while(true) {
         std::string now_path;
         Msgpack n_path;
         // if(sock->recvMsg(now_path) != NetResult::OK) continue;
@@ -300,6 +314,10 @@ int start_client() {
         }
         prompt.clear();
         prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
+        break;
+    }
+
+    while(1) {
         // char *inp=NULL;
 // inp=readline(prompt.c_str());
         std::string input;
@@ -355,11 +373,26 @@ int start_client() {
                 pasv->recvFile(filename);
                 pasving = false;
             }
-
-            continue;
         }
 
-        if(input=="PASV") {
+        if((input.size()>=2 && input.substr(0, 2) == "cd") || (input.size()>=3 && input.substr(0, 3) == "CWD")) {
+            while(true) {
+                std::string now_path;
+                Msgpack n_path;
+                sock->recvMsgpack(n_path);
+                if(n_path.type != MsgType::PATH_INFO) {
+                    sock->sendMsg("unexpected");
+                    continue;
+                }else {
+                    sock->sendMsg("yes");
+                }
+                prompt.clear();
+                prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
+                break;
+            }
+        }
+
+        if(input=="PASV" && pasving==false) {
             pasving=true;
             std::string reply;
             sock->recvMsg(reply);
