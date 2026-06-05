@@ -13,6 +13,8 @@ struct oldcwd {
     int set;
 };
 
+std::string prompt;
+
 class FtpSession {
 public:
 
@@ -75,7 +77,7 @@ public:
 
             if(token[0]=="exit" || token[0]=="QUIT") {
                 signal(SIGCHLD,SIG_IGN);
-                rl_clear_history();
+                // rl_clear_history();
                 break;
             }
     
@@ -239,12 +241,13 @@ void handle_SIGINT(int sig) {
     stop.tv_sec=0;
     stop.tv_nsec=2000000;
     nanosleep(&stop,NULL);
-    printf("\n");
-    if(running==0) {
-        rl_replace_line("",0);
-        rl_on_new_line();
-        rl_redisplay();
-    }
+    printf("\n111");
+    std::cout << prompt;
+    // if(running==0) {
+    //     rl_replace_line("",0);
+    //     rl_on_new_line();
+    //     rl_redisplay();
+    // }
 }
 
 void handle_SIGTSTP(int sig) {
@@ -265,6 +268,7 @@ void restore_signal() {
 
 int start_client() {
     handle_signal();
+    
     TcpClient client;
     if(!client.connectToHost("127.0.0.1", 2100)) {
         std::cerr << "[FAIL] connectToHost failed\n";
@@ -288,25 +292,33 @@ int start_client() {
         Msgpack n_path;
         // if(sock->recvMsg(now_path) != NetResult::OK) continue;
         sock->recvMsgpack(n_path);
-        if(n_path.type != MsgType::PATH_INFO) continue;
-        else sock->sendMsg("yes");
-
-        std::string prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
-        char *inp=NULL;
-        inp=readline(prompt.c_str());
-
-        if(inp==NULL) {
-            free(inp);
+        if(n_path.type != MsgType::PATH_INFO) {
+            sock->sendMsg("unexpected");
             continue;
+        }else {
+            sock->sendMsg("yes");
         }
-        std::string input(inp);
-        free(inp);
+        prompt.clear();
+        prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
+        // char *inp=NULL;
+// inp=readline(prompt.c_str());
+        std::string input;
+        std::cout << prompt;
+        // std::cin >> input;
+        std::getline(std::cin,input);
+        // if(inp==NULL) {
+        //     free(inp);
+        //     continue;
+        // }
+        // std::string input(inp);
+        // free(inp);
         if(input.size()==0 || input.empty()) {
             // sock->sendMsg("skip");
             continue;
         }
-        add_history(input.c_str());
-
+        // add_history(input.c_str());
+        // Msgpack in;
+        // in.type = 
         if(!input.empty()) {
             sock->sendMsg(input);
         } else {
@@ -379,7 +391,7 @@ int start_client() {
 
         if(input=="exit") {
             signal(SIGCHLD,SIG_IGN);
-            rl_clear_history();
+            // rl_clear_history();
             break;
         }
     }

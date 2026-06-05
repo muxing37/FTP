@@ -154,32 +154,34 @@ int getwide(const char *str) {
     }
     return twide;
 }
-void printc(int qu,int q,struct file info) {
+std::string printc(int qu,int q,struct file info) {
     int j=0;
     int kg=0;
+    std::string result;
     char *sgr=getcolor(info);
     if(sgr!=NULL) {
-        fputs("\033[",stdout);
-        fputs(sgr,stdout);
-        fputs("m",stdout);
-        if(qu==2 && q==0) putchar(' ');
-        if(qu==2 && q==1) putchar('\'');
-        if(qu==2 && q==2) putchar('\"');
-        fputs(info.name,stdout);
-        if(qu==2 && q==0) putchar(' ');
-        if(qu==2 && q==1) putchar('\'');
-        if(qu==2 && q==2) putchar('\"');
-        fputs("\033[0m",stdout);
+        result += "\033[";
+        result += sgr;
+        result += "m";
+        if (qu == 2 && q == 0) result += ' ';
+        if (qu == 2 && q == 1) result += '\'';
+        if (qu == 2 && q == 2) result += '"';
+        result += info.name;
+        if (qu == 2 && q == 0) result += ' ';
+        if (qu == 2 && q == 1) result += '\'';
+        if (qu == 2 && q == 2) result += '"';
+        result += "\033[0m";
     } else {
-        if(qu==2 && q==0) putchar(' ');
-        if(qu==2 && q==1) putchar('\'');
-        if(qu==2 && q==2) putchar('\"');
-        fputs(info.name,stdout);
-        if(qu==2 && q==0) putchar(' ');
-        if(qu==2 && q==1) putchar('\'');
-        if(qu==2 && q==2) putchar('\"');
+        if (qu == 2 && q == 0) result += ' ';
+        if (qu == 2 && q == 1) result += '\'';
+        if (qu == 2 && q == 2) result += '"';
+        result += info.name;
+        if (qu == 2 && q == 0) result += ' ';
+        if (qu == 2 && q == 1) result += '\'';
+        if (qu == 2 && q == 2) result += '"';
     }
     free(sgr);
+    return result;
 }
 
 std::vector<std::string> ls(int z,struct file pain);
@@ -197,7 +199,7 @@ int ifqute(char *name) {
 std::vector<std::string> output(int z,int filec,struct file pain,struct file *info) {
     int i,j;
     qsort(info,filec,sizeof(struct file),comparzhengxu);
-std::vector<std::string> res;
+    std::vector<std::string> res;
     if(z>1 && z<=ljc) printf("\n");
     int q=ifqute(pain.path);
     if((ljca>1 && z!=-1) && q==0) printf("%s:\n",pain.path);
@@ -244,199 +246,89 @@ std::vector<std::string> res;
             if(l>muid) muid=l;
         }
     }
-    if((op.l==1) && z!=-1) {
-        printf("总计 %lld\n",sum);
-    }
-// ===== 添加的变量（放在 if(op.l==1) 前面）=====
+    if(op.l==1) {
+        int i,j;
+        for(i=0;i<filec;i++) {
+            std::ostringstream oss;
 
+            char l1[11]="----------";
+            if(S_ISDIR(info[i].im->st_mode)) l1[0]='d';
+            if(S_ISLNK(info[i].im->st_mode)) l1[0]='l';
+            if(info[i].im->st_mode &S_IRUSR) l1[1]='r';
+            if(info[i].im->st_mode &S_IWUSR) l1[2]='w';
+            if(info[i].im->st_mode &S_IXUSR) l1[3]='x';
+            if(info[i].im->st_mode &S_IRGRP) l1[4]='r';
+            if(info[i].im->st_mode &S_IWGRP) l1[5]='w';
+            if(info[i].im->st_mode &S_IXGRP) l1[6]='x';
+            if(info[i].im->st_mode &S_IROTH) l1[7]='r';
+            if(info[i].im->st_mode &S_IWOTH) l1[8]='w';
+            if(info[i].im->st_mode &S_IXOTH) l1[9]='x';
 
-// ===== 原代码 =====
-if(op.l==1) {
-    int i,j;
-    for(i=0;i<filec;i++) {
-
-        // ===== 添加：用于拼接一整行 =====
-        std::ostringstream oss;
-
-        char l1[11]="----------";
-        if(S_ISDIR(info[i].im->st_mode)) l1[0]='d';
-        if(S_ISLNK(info[i].im->st_mode)) l1[0]='l';
-        if(info[i].im->st_mode &S_IRUSR) l1[1]='r';
-        if(info[i].im->st_mode &S_IWUSR) l1[2]='w';
-        if(info[i].im->st_mode &S_IXUSR) l1[3]='x';
-        if(info[i].im->st_mode &S_IRGRP) l1[4]='r';
-        if(info[i].im->st_mode &S_IWGRP) l1[5]='w';
-        if(info[i].im->st_mode &S_IXGRP) l1[6]='x';
-        if(info[i].im->st_mode &S_IROTH) l1[7]='r';
-        if(info[i].im->st_mode &S_IWOTH) l1[8]='w';
-        if(info[i].im->st_mode &S_IXOTH) l1[9]='x';
-
-        // ===== 添加 =====
-        oss << l1 << " ";
-
-printf("%s ",l1);
-
-        // ===== 添加 =====
-        oss << std::setw(mnlink) << info[i].im->st_nlink << " ";
-
-printf("%*lu ",mnlink,info[i].im->st_nlink);
-
-        struct passwd *pw=getpwuid(info[i].im->st_uid);
-        if(pw!=NULL) {
-
-            // ===== 添加 =====
-            oss << std::left << std::setw(muid)
-                << pw->pw_name << " ";
-
-printf("%-*s ",muid,pw->pw_name);
-
-        } else {
-
-            // ===== 添加 =====
-            oss << std::left << std::setw(muid)
-                << info[i].im->st_uid << " ";
-
-printf("%-*d ",muid,info[i].im->st_uid);
-
-        }
-
-        struct group  *gr=getgrgid(info[i].im->st_gid);
-        if(gr!=NULL) {
-
-            // ===== 添加 =====
-            oss << std::left << std::setw(mgid)
-                << gr->gr_name << " ";
-
-printf("%-*s ",mgid,gr->gr_name);
-
-        } else {
-
-            // ===== 添加 =====
-            oss << std::left << std::setw(mgid)
-                << info[i].im->st_gid << " ";
-
-printf("%-*d ",mgid,info[i].im->st_gid);
-
-        }
-
-        // ===== 添加 =====
-        oss << std::right
-            << std::setw(msize)
-            << info[i].im->st_size << " ";
-
-printf("%*lu ",msize,info[i].im->st_size);
-
-        time_t now=time(NULL);
-        double dif=difftime(now,info[i].im->st_mtime);
-        char *loc=setlocale(LC_ALL,NULL);
-
-        if (dif<6*30*24*60*60) {
-
-            char yue[6];
-            struct tm *tm=localtime(&info[i].im->st_mtime);
-            strftime(yue,sizeof(yue),"%b",tm);
-
-            if(loc[0]=='z' && loc[1]=='h') {
-
-                // ===== 添加 =====
-                oss << std::setw(5) << yue << " ";
-
-printf("%5s ",yue);
-
+            oss << l1 << " ";
+            oss << std::setw(mnlink) << info[i].im->st_nlink << " ";
+            struct passwd *pw=getpwuid(info[i].im->st_uid);
+            if(pw!=NULL) {
+                oss << std::left << std::setw(muid) << pw->pw_name << " ";
             } else {
-
-                // ===== 添加 =====
-                oss << std::setw(3) << yue << " ";
-
-printf("%3s ",yue);
-
+                oss << std::left << std::setw(muid) << info[i].im->st_uid << " ";
             }
 
-            // ===== 添加 =====
-            oss << std::setw(2)
-                << tm->tm_mday << " ";
-
-printf("%2d ",tm->tm_mday);
-
-            char s[6];
-            strftime(s,sizeof(s),"%H:%M",tm);
-
-            // ===== 添加 =====
-            oss << s << " ";
-
-printf("%s ",s);
-
-        } else {
-
-            char yue[6];
-            struct tm *tm=localtime(&info[i].im->st_mtime);
-            strftime(yue,sizeof(yue),"%b",tm);
-
-            if(loc[0]=='z' && loc[1]=='h') {
-
-                // ===== 添加 =====
-                oss << std::setw(5) << yue << " ";
-
-printf("%5s ",yue);
-
+            struct group  *gr=getgrgid(info[i].im->st_gid);
+            if(gr!=NULL) {
+                oss << std::left << std::setw(mgid) << gr->gr_name << " ";
             } else {
-
-                // ===== 添加 =====
-                oss << std::setw(3) << yue << " ";
-
-printf("%3s ",yue);
-
+                oss << std::left << std::setw(mgid) << info[i].im->st_gid << " ";
             }
+            oss << std::right << std::setw(msize) << info[i].im->st_size << " ";
+            time_t now=time(NULL);
+            double dif=difftime(now,info[i].im->st_mtime);
+            char *loc=setlocale(LC_ALL,NULL);
 
-            // ===== 添加 =====
-            oss << std::setw(2)
-                << tm->tm_mday << " ";
+            if(dif<6*30*24*60*60) {
+                char yue[6];
+                struct tm *tm=localtime(&info[i].im->st_mtime);
+                strftime(yue,sizeof(yue),"%b",tm);
 
-printf("%2d ",tm->tm_mday);
+                if(loc[0]=='z' && loc[1]=='h') {
+                    oss << std::setw(5) << yue << " ";
+                } else {
+                    oss << std::setw(3) << yue << " ";
+                }
+                oss << std::setw(2) << tm->tm_mday << " ";
+                char s[6];
+                strftime(s,sizeof(s),"%H:%M",tm);
+                oss << s << " ";
+            } else {
+                char yue[6];
+                struct tm *tm=localtime(&info[i].im->st_mtime);
+                strftime(yue,sizeof(yue),"%b",tm);
 
-            char s[6];
-            strftime(s,sizeof(s),"%Y",tm);
-
-            // ===== 添加 =====
-            oss << std::setw(5) << s << " ";
-
-printf("%5s ",s);
-
-        }
-
-        // ===== 添加 =====
-        // oss << ifqute(info[i].name);
-
-        if(qu) oss << " ";
-oss << info[i].name << " ";
-        printc(qu,ifqute(info[i].name),info[i]);
-
-        if(S_ISLNK(info[i].im->st_mode)) {
-
-            char t[PATH_MAX + 1];
-            int len;
-
-            len=readlink(info[i].path,t,PATH_MAX);
-
-            if(len>=0) {
-
-                t[len]='\0';
-
-                // ===== 添加 =====
-                oss << " -> " << t;
-
-printf(" -> %s",t);
-
+                if(loc[0]=='z' && loc[1]=='h') {
+                    oss << std::setw(5) << yue << " ";
+                } else {
+                    oss << std::setw(3) << yue << " ";
+                }
+                oss << std::setw(2) << tm->tm_mday << " ";
+                char s[6];
+                strftime(s,sizeof(s),"%Y",tm);
+                oss << std::setw(5) << s << " ";
             }
+            std::string temp = printc(qu,ifqute(info[i].name),info[i]);
+            oss << temp;
+
+            if(S_ISLNK(info[i].im->st_mode)) {
+                char t[PATH_MAX + 1];
+                int len;
+                len=readlink(info[i].path,t,PATH_MAX);
+                if(len>=0) {
+                    t[len]='\0';
+                    oss << " -> " << t;
+                }
+            }
+            res.push_back(oss.str());
         }
-
-        // ===== 添加：存入vector =====
-        res.push_back(oss.str());
-
-        putchar('\n');
     }
-}
-return res;
+    return res;
 }
 
 int getinfo(int i,struct dirent *temp,struct file pain,struct file *info) {
@@ -506,7 +398,7 @@ std::vector<std::string> firstls(size_t fc,struct file *first) {
         stat(info[i].rpath,info[i].im);
         filec++;
     }
-res=output(-1,filec,*first,info);
+    res=output(-1,filec,*first,info);
 
     for(i=0;i<filec;i++) {
         free(first[i].path);
@@ -535,7 +427,6 @@ std::vector<std::string> startls(int argc,char **argv) {
     for(i=1;i<argc;i++) {
         if(argv[i][1]=='-' && argv[i][0]=='-') {
             printf("ls: 未识别的选项 \"%s\"\n",argv[i]);
-            // return 2;
             return res;
         }
         for(int j=1;argv[i][j]!='\0';j++) {
@@ -744,7 +635,7 @@ std::vector<std::string> startls(int argc,char **argv) {
 std::vector<std::string> ls(int z,struct file pain) {
     int i,j;
     j=0;
-std::vector<std::string> res;
+    std::vector<std::string> res;
     struct file *info=(struct file *)malloc(32*sizeof(struct file));
     size_t filec=0;
     size_t filea=0;
@@ -773,7 +664,7 @@ std::vector<std::string> res;
     }
     closedir(dp);
 
-res=output(z,filec,pain,info);
+    res=output(z,filec,pain,info);
 
     for(i=0;i<filec;i++) {
         free(info[i].path);
