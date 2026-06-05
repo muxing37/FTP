@@ -12,7 +12,9 @@ struct oldcwd {
     char path[MAX_PATH];
     int set;
 };
-    std::string prompt;
+
+std::string prompt;
+
 class FtpSession {
 public:
 
@@ -248,19 +250,8 @@ private:
     bool pasvReady_;
 };
 
-
 void handle_SIGINT(int sig) {
-    struct timespec stop;
-    stop.tv_sec=0;
-    stop.tv_nsec=2000000;
-    nanosleep(&stop,NULL);
-    printf("\n");
-    // std::cout << prompt;
-    // if(running==0) {
-    //     rl_replace_line("",0);
-    //     rl_on_new_line();
-    //     rl_redisplay();
-    // }
+    std::cout << "\n" << prompt << std::flush;
 }
 
 void handle_SIGTSTP(int sig) {
