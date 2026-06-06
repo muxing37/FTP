@@ -45,18 +45,17 @@ public:
                 std::cout << "[INFO] client disconnected or recv failed\n";
             }
             std::cout << "[INFO] recv: " << msg << "\n";
-            if(msg == "QUIT") {
-                ctrlSock_->sendMsg("BYE");
-            }
-            if(ctrlSock_->sendMsg("ACK: " + msg) != NetResult::OK) {
-                std::cerr << "[FAIL] sendMsg failed\n";
-            }
-            if(msg == "skip") continue;
+
             std::vector<std::string> token;
             token=gettoken(msg);
 
             if(token.size()==0) {
                 continue;
+            } else if(token.size()==1 && (token[0] == "RETR" || token[0] == "STOR")) {
+                ctrlSock_->sendMsg("请输入文件名");
+                continue;
+            } else {
+                ctrlSock_->sendMsg("yes");
             }
 
             if(token[0]=="PASV" || pasvReady_==true) {
@@ -297,7 +296,6 @@ int start_client() {
     while(true) {
         std::string now_path;
         Msgpack n_path;
-        // if(sock->recvMsg(now_path) != NetResult::OK) continue;
         sock->recvMsgpack(n_path);
         if(n_path.type != MsgType::PATH_INFO) {
             sock->sendMsg("unexpected");
@@ -325,16 +323,24 @@ int start_client() {
         }
 
         add_history(input.c_str());
-
-        if(!input.empty()) {
-            sock->sendMsg(input);
-        } else {
+// input.substr(0,4) == "RETR" || input.substr(0,4) == "STOR"
+        if(input.empty()) {
             continue;
+        } else {
+            sock->sendMsg(input);
         }
 
         std::string res;
         sock->recvMsg(res);
-        std::cout << res << std::endl;
+        if(res != "yes") {
+            std::cout << res << std::endl;
+            continue;
+        }
+        // std::cout << res << std::endl;
+        if(pasving == false && (input.size() >= 4 && (input.substr(0,4) == "RETR" || input.substr(0,4) == "STOR" || input.substr(0,4) == "LIST"))) {
+            std::cout << "请使用 PASV 建立数据连接" << std::endl;
+            continue;
+        }
 
         if(pasving) {
             std::string msa;
@@ -364,7 +370,7 @@ int start_client() {
             }
         }
 
-        if((input.size()>=2 && input.substr(0, 2) == "cd") || (input.size()>=3 && input.substr(0, 3) == "CWD")) {
+        if((input.size()>=2 && input.substr(0, 2) == "cd") || (input.size()>=3 && input.substr(0,3) == "CWD")) {
             while(true) {
                 std::string now_path;
                 Msgpack n_path;
