@@ -79,7 +79,7 @@ public:
 
             if(token[0]=="exit" || token[0]=="QUIT") {
                 signal(SIGCHLD,SIG_IGN);
-                // rl_clear_history();
+                rl_clear_history();
                 break;
             }
     
@@ -98,7 +98,9 @@ private:
         if(token[0]=="STOR") {
             pasv->sendMsg("start_stor");
             pasv->sendMsg(token[1]);
-            pasv->recvFile(token[1]);
+            std::filesystem::path p(token[1]);
+            std::string filename = p.filename().string();
+            pasv->recvFile(filename);
             used = true;
         }
 
@@ -308,26 +310,22 @@ int start_client() {
         break;
     }
 
-    while(1) {
-        // char *inp=NULL;
-// inp=readline(prompt.c_str());
-        std::string input;
-        std::cout << prompt;
-        // std::cin >> input;
-        std::getline(std::cin,input);
-        // if(inp==NULL) {
-        //     free(inp);
-        //     continue;
-        // }
-        // std::string input(inp);
-        // free(inp);
-        if(input.size()==0 || input.empty()) {
-            // sock->sendMsg("skip");
+    while(true) {
+        char *inp=NULL;
+        inp=readline(prompt.c_str());
+        if(inp==NULL) {
+            free(inp);
             continue;
         }
-        // add_history(input.c_str());
-        // Msgpack in;
-        // in.type = 
+        std::string input(inp);
+        free(inp);
+
+        if(input.size()==0 || input.empty()) {
+            continue;
+        }
+
+        add_history(input.c_str());
+
         if(!input.empty()) {
             sock->sendMsg(input);
         } else {
@@ -352,14 +350,14 @@ int start_client() {
                 }
                 pasving = false;
             } else if(msa=="start_stor") {
-                std::string path;
-                pasv->recvMsg(path);
-                pasv->sendFile(path);
+                std::string up_path;
+                pasv->recvMsg(up_path);
+                pasv->sendFile(up_path);
                 pasving = false;
             } else if(msa=="start_retr") {
-                std::string path;
-                pasv->recvMsg(path);
-                std::filesystem::path p(path);
+                std::string down_path;
+                pasv->recvMsg(down_path);
+                std::filesystem::path p(down_path);
                 std::string filename = p.filename().string();
                 pasv->recvFile(filename);
                 pasving = false;
@@ -415,7 +413,7 @@ int start_client() {
 
         if(input=="exit") {
             signal(SIGCHLD,SIG_IGN);
-            // rl_clear_history();
+            rl_clear_history();
             break;
         }
     }

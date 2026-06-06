@@ -15,7 +15,4 @@ add_executable(ftp
     src/ftpls.cpp
 )
 
-# target_link_libraries(ftp pthread)
-
-target_link_libraries(ftp pthread)
-#  readline history
+target_link_libraries(ftp pthread readline history)

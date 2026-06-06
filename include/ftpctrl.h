@@ -17,8 +17,8 @@
 #include <errno.h>
 #include <termios.h>
 #include <pthread.h>
-// #include <readline/readline.h>
-// #include <readline/history.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 int start_client();
 int start_server();
