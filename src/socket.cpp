@@ -122,7 +122,7 @@ NetResult TcpSocket::sendFile(std::string& path,uint64_t offset) {
     }
     sent += n;
 
-    double percent = 100.0 * sent / filesize;
+    double percent = 100.0 * (offset + sent) / filesize;
     auto now = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(now-start).count();
     double speed = sent / 1024.0 / 1024.0 / seconds;
@@ -224,6 +224,8 @@ NetResult TcpSocket::recvFile(std::string& path,uint64_t offset) {
   auto start = std::chrono::steady_clock::now();
 
   uint64_t received = 0;
+  uint64_t totalSize = offset + ntohll(netSize);
+
   while(remain > 0) {
     int chunk = remain > buf.size() ? buf.size() : remain;
     int n = recv_all(sockfd_, buf.data(), chunk);
@@ -239,9 +241,9 @@ NetResult TcpSocket::recvFile(std::string& path,uint64_t offset) {
       return NetResult::RECV_ERROR;
     }
     remain -= n;
-    // uint64_t received = filesize - remain;
+
     received += n;
-    double percent = 100.0 * received / (received + remain);
+    double percent = 100.0 * (offset + received) / totalSize;
     auto now = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(now - start).count();
     double speed = received / 1024.0 / 1024.0 / seconds;
