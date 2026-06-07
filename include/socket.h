@@ -37,8 +37,8 @@ class TcpSocket {
   NetResult sendMsgpack(Msgpack& msg);
   NetResult recvMsgpack(Msgpack& msg);
 
-  NetResult sendFile(std::string& path);
-  NetResult recvFile(std::string& path);
+  NetResult sendFile(std::string& path,uint64_t offset);
+  NetResult recvFile(std::string& path,uint64_t offset);
 
   private:
   int sockfd_;

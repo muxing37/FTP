@@ -75,7 +75,7 @@ NetResult  TcpSocket::sendMsgpack(Msgpack& msg) {
   return NetResult::OK;
 }
 
-NetResult TcpSocket::sendFile(std::string& path) {
+NetResult TcpSocket::sendFile(std::string& path,uint64_t offset) {
   int fd = open(path.c_str(),O_RDONLY);
   if(fd < 0) {
     return NetResult::FILE_ERROR;
@@ -87,7 +87,18 @@ NetResult TcpSocket::sendFile(std::string& path) {
   }
 
   uint64_t filesize = st.st_size;
-  uint64_t netSize = htonll(filesize);
+
+  if(offset > filesize) {
+    close(fd);
+    return NetResult::FILE_ERROR;
+  }
+
+  if(offset > 0) {
+    lseek(fd, offset, SEEK_SET);
+  }
+
+  uint64_t remainSize = filesize - offset;
+  uint64_t netSize = htonll(remainSize);
 
   if(send_all(sockfd_,&netSize,sizeof(netSize))!= sizeof(netSize)) {
     close(fd);
@@ -190,26 +201,29 @@ NetResult TcpSocket::recvMsgpack(Msgpack& msg) {
   return NetResult::OK;
 }
 
-NetResult TcpSocket::recvFile(std::string& path) {
-  int fd = open(path.c_str(),O_WRONLY | O_CREAT | O_TRUNC,0644);
-
+NetResult TcpSocket::recvFile(std::string& path,uint64_t offset) {
+  int fd = open(path.c_str(), O_WRONLY | O_CREAT, 0644);
   if(fd < 0) {
     return NetResult::RECV_ERROR;
   }
+  if(offset > 0) {
+    lseek(fd, offset, SEEK_SET);
+  }
 
   uint64_t netSize = 0;
-  int ret = recv_all(sockfd_,&netSize,sizeof(netSize));
+  int ret = recv_all(sockfd_, &netSize, sizeof(netSize));
 
   if(ret != sizeof(netSize)) {
     close(fd);
     return NetResult::RECV_ERROR;
   }
 
-  uint64_t filesize = ntohll(netSize);
-  uint64_t remain = filesize;
+  uint64_t remain = ntohll(netSize);
 
   std::vector<char> buf(1024 * 1024);
   auto start = std::chrono::steady_clock::now();
+
+  uint64_t received = 0;
   while(remain > 0) {
     int chunk = remain > buf.size() ? buf.size() : remain;
     int n = recv_all(sockfd_, buf.data(), chunk);
@@ -225,9 +239,9 @@ NetResult TcpSocket::recvFile(std::string& path) {
       return NetResult::RECV_ERROR;
     }
     remain -= n;
-    uint64_t received = filesize - remain;
-
-    double percent = 100.0 * received / filesize;
+    // uint64_t received = filesize - remain;
+    received += n;
+    double percent = 100.0 * received / (received + remain);
     auto now = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(now - start).count();
     double speed = received / 1024.0 / 1024.0 / seconds;

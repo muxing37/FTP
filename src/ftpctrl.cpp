@@ -108,10 +108,15 @@ private:
             } else {
                 path += "/" + token[1];
             }
-            pasv->sendMsg(token[1]);
-            // std::filesystem::path p(token[1]);
-            // std::string filename = path.filename().string();
-            pasv->recvFile(path);
+            uint64_t offset = 0;
+            struct stat st;
+            if(stat(path.c_str(), &st) == 0) {
+                offset = st.st_size;
+            }
+
+            pasv->sendMsg(token[1] + "|" + std::to_string(offset));
+
+            pasv->recvFile(path,offset);
             used = true;
         }
 
@@ -127,8 +132,25 @@ private:
             } else {
                 path += "/" + token[1];
             }
+            struct stat st;
+            if(stat(path.c_str(), &st) != 0) {
+                pasv->sendMsg("error:file_not_found");
+                return false;
+            } else {
+                pasv->sendMsg("ok");
+            }
             pasv->sendMsg(path);
-            pasv->sendFile(path);
+            uint64_t filesize = st.st_size;
+            std::string offsetMsg;
+            pasv->recvMsg(offsetMsg);
+
+            uint64_t offset = std::stoull(offsetMsg);
+
+            if(offset > filesize) {
+                offset = 0;
+            }
+
+            pasv->sendFile(path,offset);
             used = true;
         }
         
@@ -403,17 +425,46 @@ int start_client() {
                 }
                 pasving = false;
             } else if(msa=="start_stor") {
-                std::string up_path;
-                pasv->recvMsg(up_path);
-                pasv->sendFile(up_path);
+                std::string server_path;
+                pasv->recvMsg(server_path);
+
+                size_t sep = server_path.find('|');
+                std::string filename = server_path.substr(0, sep);
+                uint64_t offset = 0;
+                if(sep != std::string::npos) {
+                    offset = std::stoull(server_path.substr(sep + 1));
+                }
+
+                std::cout << "Uploading from offset: " << offset << std::endl;
+
+                pasv->sendFile(filename,offset);
+
                 pasving = false;
+
             } else if(msa=="start_retr") {
-                std::string down_path;
-                pasv->recvMsg(down_path);
-                std::filesystem::path p(down_path);
+                std::string res;
+                pasv->recvMsg(res);
+                if(res != "ok") {
+                    std::cout << res << std::endl;
+                    continue;
+                }
+                std::string server_path;
+                pasv->recvMsg(server_path);
+
+                std::filesystem::path p(server_path);
                 std::string filename = p.filename().string();
-                pasv->recvFile(filename);
+
+                uint64_t offset = 0;
+                struct stat st;
+                if(stat(filename.c_str(), &st) == 0) {
+                    offset = st.st_size;
+                }
+
+                pasv->sendMsg(std::to_string(offset));
+                pasv->recvFile(filename, offset);
+
                 pasving = false;
+                continue;
             }
         }
 
