@@ -413,7 +413,7 @@ std::vector<std::string> firstls(size_t fc,struct file *first) {
     return res;
 }
 
-std::vector<std::string> startls(int argc,char **argv) {
+std::vector<std::string> startls(int argc,char **argv,std::string cwd) {
     std::vector<std::string> res;
 
     op={0,0};

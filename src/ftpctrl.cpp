@@ -25,8 +25,10 @@ public:
     void start() {
         while(true) {
             std::string res;
-            auto path=std::filesystem::current_path();
-            std::string now_path=path.string();
+            cwd_ = std::filesystem::current_path();
+            oldCwd_ = cwd_;
+            // auto path=std::filesystem::current_path();
+            std::string now_path=cwd_.string();
             Msgpack n_path;
             n_path.type = MsgType::PATH_INFO;
             n_path.msg = now_path;
@@ -89,24 +91,44 @@ private:
 
     bool run_cmd(std::vector<std::string> token) {
         bool used = false;
-        auto path=std::filesystem::current_path();
-        std::string now_path=path.string();
+        // auto path=std::filesystem::current_path();
+        std::string now_path=cwd_.string();
         int status;
     // 在这里使用数据连接，实现LIST、STOR、RETR的接收
         
         if(token[0]=="STOR") {
             pasv->sendMsg("start_stor");
+            std::string path=now_path;
+            if(token[1].size()>=2 && token[1].substr(0,2) == "./") {
+                token[1].erase(0,2);
+                path += "/" + token[1];
+            } else if (token[1].size()>=1 && token[1].substr(0,1) == "/") {
+                path.clear();
+                path = token[1];
+            } else {
+                path += "/" + token[1];
+            }
             pasv->sendMsg(token[1]);
-            std::filesystem::path p(token[1]);
-            std::string filename = p.filename().string();
-            pasv->recvFile(filename);
+            // std::filesystem::path p(token[1]);
+            // std::string filename = path.filename().string();
+            pasv->recvFile(path);
             used = true;
         }
 
         if(token[0]=="RETR") {
             pasv->sendMsg("start_retr");
-            pasv->sendMsg(token[1]);
-            pasv->sendFile(token[1]);
+            std::string path=now_path;
+            if(token[1].size()>=2 && token[1].substr(0,2) == "./") {
+                token[1].erase(0,2);
+                path += "/" + token[1];
+            } else if (token[1].size()>=1 && token[1].substr(0,1) == "/") {
+                path.clear();
+                path = token[1];
+            } else {
+                path += "/" + token[1];
+            }
+            pasv->sendMsg(path);
+            pasv->sendFile(path);
             used = true;
         }
         
@@ -118,11 +140,14 @@ private:
             argc++;
             for(auto& s : token) {
                 if(s=="ls" || s=="LIST") continue;
+                if(s.size()>=2 && s.substr(0,2) == "./") {
+                    s.erase(0,2);
+                }
                 argv.push_back(s.data());
                 argc++;
             }
             std::vector<std::string> ls_res;
-            ls_res=startls(argc,argv.data());
+            ls_res=startls(argc,argv.data(),cwd_);
 
             NetResult a;
             a = pasv->sendMsg("start_ls");
@@ -160,45 +185,68 @@ private:
     }
 
 private:
-    bool doCWD(std::string s) {
-        static struct oldcwd last_path={0};
-        char t[MAX_PATH]={0};
-        getcwd(t,sizeof(t));
-        if(s=="-") {
-            if(last_path.set==0) {
-                printf("cd: OLDPWD 未设定\n");
-                return -1;
-            } else {
-                printf("%s\n",last_path.path);
-                chdir(last_path.path);
-                strcpy(last_path.path,t);
-                last_path.set=1;
-                return 0;
-            }
-        }
-        const char *str=s.c_str();
-        if(str[0]=='~') {
-            char temp[MAX_PATH]={0};
-            strcpy(temp,getenv("HOME"));
-            strcat(temp,str+1);
-            if(chdir(temp)==-1) {
-                perror("cd: ");
-            }
-            strcpy(last_path.path,t);
-            last_path.set=1;
-            return 0;
-        }
 
-        if(chdir(str)==-1) {
-            perror("cd: ");
+    bool doCWD(const std::string& s) {
+        namespace fs = std::filesystem;
+        fs::path newPath;
+        while(true) {
+            if(s == "-") {
+                if(oldCwd_.empty()) {
+                    std::cout << "OLDPWD not set\n";
+                    ctrlSock_->sendMsg("OLDPWD not set");
+                    return false;
+                }
+                std::cout << oldCwd_ << "\n";
+                ctrlSock_->sendMsg("ok");
+                std::swap(cwd_,oldCwd_);
+                break;
+            }
+
+            if(!s.empty() && s[0] == '~') {
+                const char* home = getenv("HOME");
+                if(home == nullptr) {
+                    ctrlSock_->sendMsg("home == nullptr");
+                    return false;
+                }
+                newPath = fs::path(home);
+                if(s.size() > 1) {
+                    newPath /= s.substr(1);
+                }
+            } else if(fs::path(s).is_absolute()) {
+                newPath = fs::path(s);
+            } else {
+                newPath = cwd_ / s;
+            }
+
+            try {
+                newPath = fs::weakly_canonical(newPath);
+            }
+            catch(...) {
+                ctrlSock_->sendMsg("error");
+                return false;
+            }
+
+            if(!fs::exists(newPath)) {
+                std::cout << "No such file or directory\n";
+                ctrlSock_->sendMsg("No such file or directory");
+                return false;
+            }
+
+            if(!fs::is_directory(newPath)) {
+                std::cout << "Not a directory\n";
+                ctrlSock_->sendMsg("Not a directory");
+                return false;
+            }
+            ctrlSock_->sendMsg("ok");
+            oldCwd_ = cwd_;
+            cwd_ = newPath;
+            break;
         }
-        strcpy(last_path.path,t);
-        last_path.set=1;
 
         while(true) {
             std::string res;
-            auto path=std::filesystem::current_path();
-            std::string now_path=path.string();
+            // auto path=std::filesystem::current_path();
+            std::string now_path=cwd_.string();
             Msgpack n_path;
             n_path.type = MsgType::PATH_INFO;
             n_path.msg = now_path;
@@ -211,7 +259,7 @@ private:
             std::cout << res << std::endl;
             break;
         }
-        return 0;
+        return true;
     }
 
     bool doPASV() {
@@ -245,9 +293,8 @@ private:
     std::unique_ptr<TcpSocket> ctrlSock_;
     std::unique_ptr<TcpSocket> pasv;
     TcpServer dataServer;
-
-
-private:
+    std::filesystem::path cwd_;
+    std::filesystem::path oldCwd_;
     bool pasvReady_;
 };
 
@@ -374,6 +421,12 @@ int start_client() {
             while(true) {
                 std::string now_path;
                 Msgpack n_path;
+                std::string res;
+                sock->recvMsg(res);
+                if(res != "ok") {
+                    std::cout << res <<std::endl;
+                    break;
+                }
                 sock->recvMsgpack(n_path);
                 if(n_path.type != MsgType::PATH_INFO) {
                     sock->sendMsg("unexpected");
